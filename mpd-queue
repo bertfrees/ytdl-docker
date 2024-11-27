@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -e
+
+if [ -z "$MPD_HOST" ]; then
+	echo "MPD_HOST not set" >&2
+	exit 1
+fi
+if [ -z "$MPD_PORT" ]; then
+	echo "MPD_PORT not set" >&2
+	exit 1
+fi
+if [ -z "$MPD_DOWNLOADS_PATH" ]; then
+	echo "MPD_DOWNLOADS_PATH not set" >&2
+	exit 1
+fi
+
+if [[ $# == 0 ]]; then
+	echo "Expecting at least one argument" >&2
+	exit 1
+elif [[ $# == 1 ]]; then
+	ACTION=add-to-queue
+	TRACK="$1"
+elif [[ $# == 2 ]]; then
+	ACTION="$1"
+	TRACK="$2"
+else
+	echo "Expecting at most two arguments" >&2
+	exit 1
+fi
+
+TRACK=${MPD_DOWNLOADS_PATH}/${TRACK#/app/downloads/}
+
+case $ACTION in
+	add-to-queue)
+		export TRACK
+		expect -c '
+		  spawn telnet $env(MPD_HOST) $env(MPD_PORT)
+		  expect "OK MPD"
+		  send "update\r"
+		  expect "OK"
+		  sleep 1
+		  send "addid \"$env(TRACK)\"\r"
+		  expect "OK"
+		  send "\x1Dquit\r"
+		  interact
+		'
+		;;
+	play-next)
+		export TRACK
+		expect -c '
+		  spawn telnet $env(MPD_HOST) $env(MPD_PORT)
+		  expect "OK MPD"
+		  send "update\r"
+		  expect "OK"
+		  sleep 1
+		  send "status\r"
+		  expect {
+		    "state: play" {
+		      expect "OK"
+		      send "addid \"$env(TRACK)\" +0\r"
+		      expect "OK"
+		    }
+		    "state: stop" {
+		      expect "OK"
+		      send "addid \"$env(TRACK)\"\r"
+		      expect "OK"
+		    }
+		  }
+		  send "\x1Dquit\r"
+		  interact
+		'
+		;;
+	play-now)
+		export TRACK
+		expect -c '
+		  spawn telnet $env(MPD_HOST) $env(MPD_PORT)
+		  expect "OK MPD"
+		  send "update\r"
+		  expect "OK"
+		  sleep 1
+		  send "status\r"
+		  expect {
+		    "state: play" {
+		      expect "OK"
+		      send "addid \"$env(TRACK)\" +0\r"
+		      expect "OK"
+		      send "next\r"
+		      expect "OK"
+		    }
+		    "state: stop" {
+		      expect "OK"
+		      send "addid \"$env(TRACK)\"\r"
+		      expect -re "Id: (\\d+)"
+		      set id $expect_out(1,string)
+		      expect "OK"
+		      send "playid $id\r"
+		      expect "OK"
+		    }
+		  }
+		  send "\x1Dquit\r"
+		  interact
+		'
+		;;
+	*)
+		echo "Invalid argument: $ACTION" >&2
+		exit 1
+		;;
+esac
